@@ -3,6 +3,7 @@ package me.fraserxu.rncouchbaselite;
 import android.net.Uri;
 import android.os.AsyncTask;
 
+import com.couchbase.lite.CouchbaseLiteException;
 import com.couchbase.lite.Database;
 import com.couchbase.lite.Manager;
 import com.couchbase.lite.View;
@@ -12,6 +13,7 @@ import com.couchbase.lite.javascript.JavaScriptViewCompiler;
 import com.couchbase.lite.listener.Credentials;
 import com.couchbase.lite.listener.LiteListener;
 import com.couchbase.lite.util.Log;
+import com.couchbase.lite.util.ZipUtils;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Callback;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -25,13 +27,17 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
 import java.util.Arrays;
+import java.util.Properties;
+
+import Acme.Serve.Serve;
 
 import static me.fraserxu.rncouchbaselite.ReactNativeJson.convertJsonToMap;
 
@@ -68,14 +74,26 @@ public class ReactCBLite extends ReactContextBaseJavaModule {
     @ReactMethod
     public static void logLevel(String name) {
         switch (name) {
-            case "DEBUG":
+            case "VERBOSE": {
+                setLogLevel(Log.VERBOSE);
+                break;
+            }
+            case "DEBUG": {
                 setLogLevel(Log.DEBUG);
-            case "INFO":
+                break;
+            }
+            case "INFO": {
                 setLogLevel(Log.INFO);
-            case "WARN":
+                break;
+            }
+            case "WARN": {
                 setLogLevel(Log.WARN);
-            case "ERROR":
+                break;
+            }
+            case "ERROR": {
                 setLogLevel(Log.ERROR);
+                break;
+            }
             case "ASSERT":
                 setLogLevel(Log.ASSERT);
         }
@@ -84,10 +102,10 @@ public class ReactCBLite extends ReactContextBaseJavaModule {
     @ReactMethod
     public void initWithAuth(String username, String password, Callback callback) {
         Credentials credentials;
-        if(username == null && password == null) {
+        if (username == null && password == null) {
             credentials = null;
             Log.w(TAG, "No credential specified, your listener is unsecured and you are putting your data at risk");
-        } else if(username == null || password == null) {
+        } else if (username == null || password == null) {
             callback.invoke(null, "username and password must not be null");
             return;
         } else {
@@ -111,7 +129,7 @@ public class ReactCBLite extends ReactContextBaseJavaModule {
             this.startListener();
 
             String url;
-            if(credentials != null) {
+            if (credentials != null) {
                 url = String.format(
                         "http://%s:%s@localhost:%d/",
                         credentials.getLogin(),
@@ -134,6 +152,8 @@ public class ReactCBLite extends ReactContextBaseJavaModule {
     }
 
     private static void setLogLevel(int level) {
+        Log.i(TAG, "Setting log level to '" + level + "'");
+
         Manager.enableLogging(Log.TAG, level);
         Manager.enableLogging(Log.TAG_SYNC, level);
         Manager.enableLogging(Log.TAG_QUERY, level);
@@ -155,8 +175,16 @@ public class ReactCBLite extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void startListener() {
-        if(listener == null) {
-            listener = new LiteListener(manager, SUGGESTED_PORT, allowedCredentials);
+        if (listener == null) {
+            if (allowedCredentials == null) {
+                Log.i(TAG, "No credentials, so binding to localhost");
+                Properties props = new Properties();
+                props.put(Serve.ARG_BINDADDRESS, "localhost");
+                listener = new LiteListener(manager, SUGGESTED_PORT, allowedCredentials, props);
+            } else {
+                listener = new LiteListener(manager, SUGGESTED_PORT, allowedCredentials);
+            }
+
             Log.i(TAG, "Starting CBL listener on port " + listener.getListenPort());
         } else {
             Log.i(TAG, "Restarting CBL listener on port " + listener.getListenPort());
@@ -219,8 +247,12 @@ public class ReactCBLite extends ReactContextBaseJavaModule {
                 Log.i(TAG, "Uploading attachment '" + sourceUri + "' to '" + targetUri + "'");
 
                 InputStream input;
-                if (sourceUri.startsWith("/")) {
-                    input = new FileInputStream(new File(sourceUri));
+                if (sourceUri.startsWith("/") || sourceUri.startsWith("file:/")) {
+                    String path = sourceUri.replace("file://", "/")
+                            .replace("file:/", "/");
+                    File file = new File(path);
+
+                    input = new FileInputStream(file);
                 } else if (sourceUri.startsWith("content://")) {
                     input = ReactCBLite.this.context.getContentResolver().openInputStream(Uri.parse(sourceUri));
                 } else {
@@ -310,4 +342,29 @@ public class ReactCBLite extends ReactContextBaseJavaModule {
             this.response = response;
         }
     }
+    
+    // Database
+
+    @ReactMethod
+    public void installPrebuiltDatabase(String name) {
+        Manager manager = null;
+        Database db = null;
+        try {
+            manager = new Manager(new AndroidContext(this.context), Manager.DEFAULT_OPTIONS);
+            db = manager.getExistingDatabase(name);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (CouchbaseLiteException e) {
+            e.printStackTrace();
+        }
+        if (db == null) {
+            try {
+                ZipUtils.unzip(this.context.getAssets().open(name + ".zip"), manager.getContext().getFilesDir());
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+    }
+
 }

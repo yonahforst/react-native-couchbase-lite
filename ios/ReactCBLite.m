@@ -14,6 +14,7 @@
 #import "CouchbaseLiteListener/CouchbaseLiteListener.h"
 #import "CBLRegisterJSViewCompiler.h"
 #import <AssetsLibrary/AssetsLibrary.h>
+#import "ReactCBLiteRequestHandler.h"
 
 @implementation ReactCBLite
 
@@ -32,6 +33,9 @@ RCT_EXPORT_METHOD(initWithAuth:(NSString*)username password:(NSString*)password 
         NSLog(@"Launching Couchbase Lite...");
         CBLManager* dbmgr = [CBLManager sharedInstance];
         CBLRegisterJSViewCompiler();
+
+        //register the server with CBL_URLProtocol
+        [dbmgr internalURL];
 
         int suggestedPort = 5984;
 
@@ -188,6 +192,18 @@ RCT_EXPORT_METHOD(upload:(NSString *)method
             callback(@[[NSNull null], returnStuff]);
         }
     });
+}
+
+// MARK: - Database
+
+RCT_EXPORT_METHOD(installPrebuiltDatabase:(NSString *) databaseName)
+{
+    CBLManager* manager = [CBLManager sharedInstance];
+    CBLDatabase* db = [manager existingDatabaseNamed:databaseName error:nil];
+    if (db == nil) {
+        NSString* dbPath = [[NSBundle mainBundle] pathForResource:databaseName ofType:@"cblite2"];
+        [manager replaceDatabaseNamed:databaseName withDatabaseDir:dbPath error:nil];
+    }
 }
 
 @end
